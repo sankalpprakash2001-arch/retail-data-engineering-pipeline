@@ -1,0 +1,25 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+**/profiles.yml
+**/*token*
+**/*secret*
+
+# Python / Airflow
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+airflow/logs/
+
+# dbt generated files
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# OS / editor / local Git state
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

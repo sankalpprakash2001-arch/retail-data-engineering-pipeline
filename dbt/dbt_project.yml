@@ -1,0 +1,30 @@
+name: walmart_project
+version: "1.0.0"
+config-version: 2
+profile: walmart_project
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  walmart_project:
+    silver_t:
+      +materialized: incremental
+      +schema: silver_t
+    silver_b:
+      +materialized: table
+      +schema: silver_b
+    gold:
+      +schema: gold
+      dimensions:
+        # Snapshots require a queryable relation; ephemeral models cannot be snapshot inputs.
+        +materialized: view
+      fact:
+        +materialized: table
