@@ -4,48 +4,11 @@ A portfolio project demonstrating a Databricks Lakehouse architecture using Apac
 
 ## Architecture
 
-The pipeline uses Apache Airflow as the central orchestrator. It coordinates the Databricks ingestion job and subsequent dbt execution, while Databricks provides the underlying Lakehouse platform for data storage and transformation.
+The pipeline follows a Databricks Medallion Architecture (Bronze → Silver → Gold), with Apache Airflow acting as the central orchestrator for ingestion and dbt transformation workflows.
 
-```mermaid
-flowchart TB
-    AF["Apache Airflow<br/>Daily DAG<br/><br/>Pipeline Orchestration"]
+![Walmart Data Engineering Pipeline Architecture](docs/architecture.png)
 
-    EXEC["Pipeline Execution<br/>Databricks SDK + dbt CLI"]
-
-    AF --> EXEC
-
-    subgraph LAKEHOUSE["DATABRICKS LAKEHOUSE — DELTA LAKE"]
-        direction LR
-
-        PG[("PostgreSQL")]
-        ING["Databricks<br/>Ingestion Job"]
-        BR["BRONZE<br/>Raw Delta Tables"]
-        ST["SILVER — TECHNICAL<br/>Incremental Models"]
-        SB["SILVER — BUSINESS<br/>OBT Model"]
-        GD["GOLD — DIMENSIONS<br/>Dimension Base Views"]
-        GF["GOLD — FACT<br/>Fact Orders"]
-
-        PG --> ING --> BR --> ST --> SB
-        SB --> GD
-        SB --> GF
-    end
-
-    SNAP["dbt Snapshots<br/>SCD Type 2"]
-
-    EXEC -.-> ING
-    EXEC -.-> SB
-    GD --> SNAP
-
-    style AF fill:#eee8ff,stroke:#805ad5,stroke-width:2px
-    style EXEC fill:#f3e8ff,stroke:#805ad5,stroke-width:1.5px
-    style PG fill:#e6f0ff,stroke:#4776b8
-    style BR fill:#fff0d9,stroke:#d69e36
-    style ST fill:#e2f1ff,stroke:#4285b5
-    style SB fill:#e2f1ff,stroke:#4285b5
-    style GD fill:#fff4c7,stroke:#c49a24
-    style GF fill:#fff4c7,stroke:#c49a24
-    style SNAP fill:#f4e8ff,stroke:#9863bd
-```
+> **Execution status:** The original upstream source was a Ghost-hosted PostgreSQL database that is being discontinued. Consequently, the original ingestion path cannot currently be demonstrated end to end. The repository preserves the dbt transformation project and configurable Airflow orchestration implementation. A successful end-to-end execution against a live source is not claimed.
 
 **Orchestration flow:**
 
