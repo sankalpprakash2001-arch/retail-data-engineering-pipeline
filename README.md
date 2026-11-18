@@ -1,93 +1,272 @@
 # Walmart Data Engineering Pipeline
 
-A portfolio project demonstrating a Databricks lakehouse transformation workflow orchestrated with Apache Airflow and dbt. The project is organised around a Bronze → Silver → Gold medallion architecture.
-
-> **Execution status and limitation:** The original source was a Ghost-hosted PostgreSQL database. That hosted database is being discontinued, so the original upstream ingestion path cannot currently be demonstrated end to end. The repository preserves the dbt transformation project and a configurable Airflow Databricks-job orchestration pattern. A successful end-to-end run against a live source is not claimed.
+A portfolio project demonstrating a Databricks Lakehouse architecture using Apache Airflow and dbt. The project follows the Medallion Architecture (Bronze → Silver → Gold), with Airflow orchestrating ingestion and transformation workflows.
 
 ## Architecture
 
+The pipeline uses Apache Airflow as the central orchestrator. It coordinates the Databricks ingestion job and subsequent dbt execution, while Databricks provides the underlying Lakehouse platform for data storage and transformation.
+
 ```mermaid
-flowchart TD
-    PG[(PostgreSQL source<br/>historical / currently unavailable)] --> ING[Databricks ingestion job]
-    ING --> B[Bronze tables]
-    B --> ST[dbt Silver technical models]
-    ST --> SB[dbt Silver business model]
-    SB --> GD[Gold dimension base views]
-    GD --> SNAP[dbt snapshots / SCD Type 2]
-    SB --> FACT[Gold fact table]
-    A[Apache Airflow daily DAG] --> ING
-    A --> ST
-    A --> SB
-    A --> SNAP
-    A --> FACT
+flowchart TB
+    AF["Apache Airflow<br/>Daily DAG<br/><br/>Pipeline Orchestration"]
+
+    EXEC["Pipeline Execution<br/>Databricks SDK + dbt CLI"]
+
+    AF --> EXEC
+
+    subgraph LAKEHOUSE["DATABRICKS LAKEHOUSE — DELTA LAKE"]
+        direction LR
+
+        PG[("PostgreSQL")]
+        ING["Databricks<br/>Ingestion Job"]
+        BR["BRONZE<br/>Raw Delta Tables"]
+        ST["SILVER — TECHNICAL<br/>Incremental Models"]
+        SB["SILVER — BUSINESS<br/>OBT Model"]
+        GD["GOLD — DIMENSIONS<br/>Dimension Base Views"]
+        GF["GOLD — FACT<br/>Fact Orders"]
+
+        PG --> ING --> BR --> ST --> SB
+        SB --> GD
+        SB --> GF
+    end
+
+    SNAP["dbt Snapshots<br/>SCD Type 2"]
+
+    EXEC -.-> ING
+    EXEC -.-> SB
+    GD --> SNAP
+
+    style AF fill:#eee8ff,stroke:#805ad5,stroke-width:2px
+    style EXEC fill:#f3e8ff,stroke:#805ad5,stroke-width:1.5px
+    style PG fill:#e6f0ff,stroke:#4776b8
+    style BR fill:#fff0d9,stroke:#d69e36
+    style ST fill:#e2f1ff,stroke:#4285b5
+    style SB fill:#e2f1ff,stroke:#4285b5
+    style GD fill:#fff4c7,stroke:#c49a24
+    style GF fill:#fff4c7,stroke:#c49a24
+    style SNAP fill:#f4e8ff,stroke:#9863bd
 ```
 
-The Airflow DAG is scheduled daily. It triggers a configured Databricks Job through the Databricks SDK, waits for its completion, then runs dbt freshness, transformations, tests, snapshots and Gold fact creation. The upstream Databricks Job must populate the Bronze tables expected by `dbt/models/source/sources.yml`.
+**Orchestration flow:**
 
-## Technology stack
+1. Apache Airflow runs a scheduled daily DAG.
+2. The DAG triggers the Databricks ingestion job through the Databricks SDK and waits for its completion.
+3. Airflow executes dbt commands for source freshness, Silver transformations, tests, snapshots and Gold fact creation.
+4. dbt compiles the transformations, while Databricks executes the SQL against Delta tables.
 
-- Databricks and Delta Lake (Bronze / Silver / Gold)
-- dbt Core and dbt-databricks
-- Incremental dbt models using merge semantics
-- dbt tests and timestamp-strategy snapshots (SCD Type 2)
-- Apache Airflow with a daily DAG and Databricks SDK integration
-- Docker Compose with a dedicated dbt virtual environment
+> **Execution status:** The original upstream source was a Ghost-hosted PostgreSQL database that is being discontinued. Consequently, the original ingestion path cannot currently be demonstrated end to end. The repository preserves the dbt transformation project and configurable Airflow orchestration implementation. A successful end-to-end execution against a live source is not claimed.
 
-## Repository layout
+## Technology Stack
+
+| Technology | Purpose |
+|---|---|
+| Azure Databricks | Lakehouse platform and data processing |
+| Delta Lake | Storage format for Bronze, Silver and Gold |
+| dbt Core | SQL transformations, testing and snapshots |
+| dbt-databricks | dbt integration with Databricks |
+| Apache Airflow | Workflow orchestration and scheduling |
+| Databricks SDK | Triggering and monitoring Databricks Jobs |
+| Docker & Docker Compose | Containerised Airflow environment |
+| PostgreSQL | Original upstream data source |
+
+## Repository Structure
 
 ```text
-.
+walmart-data-engineering-pipeline/
+│
 ├── airflow/
-│   ├── dags/orchestrate.py
+│   ├── dags/
+│   │   └── orchestrate.py
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   ├── requirements.txt
 │   └── .env.example
+│
 ├── dbt/
 │   ├── models/
+│   │   ├── source/
+│   │   ├── silver_t/
+│   │   ├── silver_b/
+│   │   └── gold/
 │   ├── snapshots/
 │   ├── macros/
 │   ├── tests/
 │   ├── dbt_project.yml
 │   └── profiles.yml.example
-└── docs/
+│
+├── docs/
+│   ├── architecture.md
+│   └── github-publishing.md
+│
+├── .gitignore
+└── README.md
 ```
 
-## Setup
+## Data Transformation Layers
 
-1. Install Docker Desktop with the WSL2 backend.
-2. Copy `airflow/.env.example` to `airflow/.env`.
-3. Set the Databricks workspace host, personal access token, SQL Warehouse HTTP path, catalog, schema and ingestion Job ID. Never commit `airflow/.env`.
-4. Copy `dbt/profiles.yml.example` to `dbt/profiles.yml`. The Docker setup points `DBT_PROFILES_DIR` at `/opt/airflow/dbt`; the actual `profiles.yml` is intentionally excluded from Git.
-5. From the `airflow` directory, start the services:
+### 1. Bronze Layer — Raw Data Ingestion
 
-   ```bash
-   docker compose up -d --build
-   ```
+- Data is ingested from PostgreSQL into Databricks.
+- Source tables are stored as Delta tables.
+- The ingestion job is triggered and monitored through the Databricks SDK.
 
-6. Open `http://localhost:8082` and sign in using the local credentials configured in `airflow/.env`. Change the default credentials before exposing the service beyond localhost.
-7. In Databricks, ensure the configured ingestion Job is valid and writes the six Bronze source tables listed in `dbt/models/source/sources.yml`.
-8. Enable the DAG and trigger a manual run for validation. The DAG is scheduled daily (`@daily`) and has `catchup=False`.
+### 2. Silver Layer — Data Transformation
 
-## dbt models
+**Silver Technical (`silver_t`)**
 
-- `silver_t`: customer, employee, order, order-item, product and store incremental models.
-- `silver_b`: business-level order-item wide table (`obt_b`), joining the Silver technical models through `ref()`.
-- `gold/dimensions`: customer, employee, order, product and store dimension base views. These are views because dbt snapshots need a queryable relation; ephemeral models are not valid physical snapshot inputs. The order base is kept at order grain (not order-item grain).
-- `snapshots`: five timestamp-strategy snapshots using each entity's updated timestamp and a current-row `dbt_valid_to` sentinel.
-- `gold/fact`: `fact_orders`, sourced from `obt_b`.
+- Customer, employee, order, order-item, product and store models.
+- Incremental processing using dbt incremental materialisation.
+- Merge semantics using configured unique keys.
+- Uses `updated_timestamp` as the incremental cursor.
 
-## Important configuration notes
+**Silver Business (`silver_b`)**
 
-- `dbt source freshness` is included in the DAG. Configure a true ingestion/load timestamp and freshness thresholds in `models/source/sources.yml` before relying on freshness results; business `updated_timestamp` should not automatically be treated as ingestion time.
-- The incremental filters use `updated_timestamp`. Validate late-arriving records and timestamp ties for your source; for high-reliability CDC, use a stable composite cursor or upstream CDC sequence where available.
-- The employee join in `obt_b` is by `store_id`. Validate its cardinality against the intended fact grain to avoid multiplying order-item rows when a store has multiple employees.
-- The Databricks ingestion job and credentials are external prerequisites. The repository does not contain credentials or a live Ghost database.
+- Builds a business-level Order Item Wide Table (OBT).
+- Combines the technical Silver models using dbt `ref()` dependencies.
+- Provides a consolidated dataset for downstream Gold models.
 
-## Validation status
+### 3. Gold Layer — Business-Ready Data
 
-The supplied project history shows that the Airflow environment was built, the DAG imported, dbt was installed in an isolated environment, and `dbt debug` successfully connected to a running Databricks Starter Warehouse. The final DAG and model refactors in this repository have not been executed against a live upstream source in this packaging environment. Validate them in your Databricks workspace before describing the pipeline as fully end-to-end operational.
+**Dimension Models**
+
+- Customer, employee, order, product and store dimension base views.
+- These views act as queryable inputs for dbt snapshots.
+
+**Fact Model**
+
+- `fact_orders` is created using the business-level OBT model.
+
+**SCD Type 2 Snapshots**
+
+- Five dbt snapshots are configured for customers, employees, orders, products and stores.
+- Uses the timestamp snapshot strategy.
+- Tracks historical changes using `dbt_valid_from` and `dbt_valid_to`.
+
+## Airflow Orchestration
+
+Apache Airflow coordinates the pipeline through a daily DAG.
+
+The workflow includes:
+
+1. Triggering and monitoring the Databricks ingestion job.
+2. Running dbt source freshness checks.
+3. Executing Silver technical transformations.
+4. Running Silver technical tests.
+5. Executing Silver business transformations.
+6. Running Silver business tests.
+7. Executing Gold transformations.
+8. Running dbt snapshots for SCD Type 2 history.
+9. Creating the Gold fact table.
+
+The DAG uses the Databricks SDK to interact with Databricks Jobs and executes dbt commands from a dedicated virtual environment.
+
+## Setup and Execution
+
+### Prerequisites
+
+- Docker Desktop with WSL2 backend.
+- A Databricks workspace.
+- A running Databricks SQL Warehouse.
+- A configured Databricks ingestion Job.
+- Required Databricks credentials and permissions.
+
+### Step 1: Configure Airflow
+
+Navigate to the `airflow` directory.
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Configure the required Databricks environment variables, including:
+
+- `DATABRICKS_HOST`
+- `DATABRICKS_TOKEN`
+- `DATABRICKS_JOB_ID`
+
+Also configure the local Airflow credentials as required by the Compose setup.
+
+### Step 2: Configure dbt
+
+Copy the example profile:
+
+```bash
+cp ../dbt/profiles.yml.example ../dbt/profiles.yml
+```
+
+Configure the Databricks connection details:
+
+- Workspace host
+- SQL Warehouse HTTP path
+- Personal access token
+- Catalog
+- Schema
+
+The Docker setup uses `DBT_PROFILES_DIR` to locate the dbt profile.
+
+### Step 3: Build and Start Services
+
+From the `airflow` directory:
+
+```bash
+docker compose up -d --build
+```
+
+### Step 4: Access Airflow
+
+Open:
+
+```text
+http://localhost:8082
+```
+
+Sign in using the local credentials configured for your Airflow environment.
+
+Enable the DAG and trigger a manual run for validation.
+
+The DAG is configured with:
+
+- Schedule: `@daily`
+- Catchup: `False`
+
+Ensure that the Databricks ingestion job is valid and populates the Bronze tables expected by the dbt source definitions.
+
+## Important Implementation Details
+
+- **Incremental processing:** Silver models use `updated_timestamp` as their incremental cursor. Late-arriving records and timestamp ties should be validated against the upstream source.
+- **Snapshots:** Dimension base models are views rather than ephemeral models because snapshots require queryable relations.
+- **Source freshness:** Configure a genuine ingestion/load timestamp in `sources.yml`. A business update timestamp should not automatically be treated as an ingestion timestamp.
+- **Data grain:** The Gold order dimension is maintained at order grain, while the business OBT contains order-item-level data.
+- **Join cardinality:** The employee join in `obt_b` uses `store_id`. Validate its cardinality to prevent unintended multiplication of order-item records.
+- **Orchestration:** Airflow coordinates the Databricks Job and dbt execution, while Databricks performs the actual data processing.
+
+## Validation Status and Limitations
+
+The development environment was built using Docker Compose and Airflow 2.9.3.
+
+The dbt environment was configured with dbt Core and dbt-databricks in an isolated virtual environment. `dbt debug` successfully connected to a running Databricks Starter Warehouse during development.
+
+The final packaged DAG and model refactors have not been executed against a live upstream source. Therefore, the complete pipeline should be validated in a Databricks workspace before being considered production-ready.
+
+The original Ghost PostgreSQL source is no longer available for reliable end-to-end testing.
 
 ## Security
 
-Never commit access tokens, passwords, `.env`, `profiles.yml`, Airflow logs, dbt logs, `target/`, `dbt_packages/`, or local state. Rotate any Databricks token that was previously included in a shared archive.
+Never commit:
+
+- Databricks access tokens.
+- Passwords or credentials.
+- `.env` files.
+- Actual `profiles.yml` files.
+- Airflow logs and dbt logs.
+- dbt `target/` and `dbt_packages/` directories.
+
+Use the provided example configuration files and supply credentials through your local environment.
+
+**Note:** Any Databricks token previously included in a shared project archive should be revoked and replaced.
+
+---
+
+**Project focus:** Databricks Lakehouse Architecture | Apache Airflow Orchestration | dbt Transformations | Incremental Processing | SCD Type 2 | Docker
